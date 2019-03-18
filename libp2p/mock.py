@@ -93,6 +93,7 @@ class MockControlClient:
     handlers: Dict[str, StreamHandler]
     control_maddr: Multiaddr
     listen_maddr: Multiaddr
+    is_listening: bool
 
     def __init__(self, map_peer_id_to_control_client: Dict[PeerID, 'MockControlClient']) -> None:
         """
@@ -116,6 +117,7 @@ class MockControlClient:
         self.control_maddr = f"/unix/control_{self._uuid}"
         self.listen_maddr = f"/unix/listen__{self._uuid}"
         self.handlers = {}
+        self.is_listening = False
 
     def __del__(self) -> None:
         del self._map_peer_id_to_control_client[self._peer_id]
@@ -140,10 +142,11 @@ class MockControlClient:
         )
 
     async def listen(self) -> None:
-        pass
+        self.is_listening = True
 
     async def close(self) -> None:
         del self._map_peer_id_to_control_client[self._peer_id]
+        self.is_listening = False
 
     async def identify(self) -> Tuple[PeerID, Tuple[Multiaddr, ...]]:
         return self._peer_id, tuple(self._maddrs)
@@ -493,7 +496,7 @@ class MockDHTClient:
             if key in peer_dhtc._values_store:
                 # TODO: make sure it is consistent with the ECDSA in eth_key
                 return crypto_pb.PublicKey(
-                    Type=crypto_pb.ECDSA,
+                    Type=crypto_pb.Secp256k1,
                     Data=peer_dhtc._values_store[key],
                 )
         raise ControlFailure(f"public key of peer {peer_id} is not found")

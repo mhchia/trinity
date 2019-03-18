@@ -41,13 +41,13 @@ class BasePubSub(ABC):
     async def list_peers(self, topic: str) -> Tuple[PeerID, ...]:
         pass
 
-    # @abstractmethod
-    # def register_topic_validator(self, topic, validator):
-    #     pass
+    @abstractmethod
+    def register_topic_validator(self, topic, validator):
+        pass
 
-    # @abstractmethod
-    # def unregister_topic_validator(self, topic):
-    #     pass
+    @abstractmethod
+    def unregister_topic_validator(self, topic):
+        pass
 
     # @abstractmethod
     # def blacklist_peer(self, peer_id):
@@ -78,6 +78,9 @@ class DaemonPubSub(BasePubSub):
     def register_topic_validator(self, topic: str, validator: Validator) -> None:
         self._validators[topic] = validator
 
+    def unregister_topic_validator(self, topic: str) -> None:
+        del self._validators[topic]
+
     async def subscribe(self, topic: str) -> None:
         if topic in self._map_topic_stream:
             raise ValueError(f"Topic {topic} has been subscribed. Unsubscribe it first.")
@@ -91,7 +94,7 @@ class DaemonPubSub(BasePubSub):
             )
         )
         # yield to the `_topic_listener`
-        await asyncio.sleep(0.001)
+        await asyncio.sleep(0)
 
     async def unsubscribe(self, topic: str) -> None:
         if topic not in self._map_topic_stream:

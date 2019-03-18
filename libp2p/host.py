@@ -87,6 +87,10 @@ class DaemonHost(BaseHost):
     def __init__(self, control_client: ControlClient):
         self.control_client = control_client
 
+    async def setup(self) -> None:
+        if not self.control_client.is_listening:
+            await self.control_client.listen()
+
     async def get_peer_info(self) -> PeerInfo:
         if self.peer_info is None:
             peer_id, maddrs = await self.control_client.identify()

@@ -116,7 +116,8 @@ class ControlClient:
     listen_maddr: Multiaddr
     client: Client
     handlers: Dict[str, StreamHandler]
-    listener: asyncio.AbstractServer = None
+    listener: asyncio.AbstractServer
+    is_listening: bool = False
     logger = logging.getLogger('p2pclient.ControlClient')
 
     def __init__(self, client: Client, listen_maddr: Multiaddr = None) -> None:
@@ -140,7 +141,7 @@ class ControlClient:
         await handler(stream_info, reader, writer)
 
     async def listen(self) -> None:
-        if self.listener is not None:
+        if self.is_listening:
             raise ControlFailure("Listener is already listening")
         proto_code = parse_conn_protocol(self.listen_maddr)
         if proto_code == protocols.P_UNIX:
@@ -154,11 +155,13 @@ class ControlClient:
             raise ValueError(
                 f"protocol not supported: protocol={protocols.protocol_with_code(proto_code)}"
             )
+        self.is_listening = True
         self.logger.info("Client %s starts listening to %s", self, self.listen_maddr)
 
     async def close(self) -> None:
         self.listener.close()
         await self.listener.wait_closed()
+        self.is_listening = False
         self.listener = None
         self.logger.info("Client %s closed", self)
 

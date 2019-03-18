@@ -40,6 +40,24 @@ async def test_daemon_pubsub_register_topic_validator(daemon_pubsubs):
 
 
 @pytest.mark.asyncio
+async def test_daemon_pubsub_unregister_topic_validator(daemon_pubsubs):
+    ps = daemon_pubsubs[0]
+
+    async def validator(peer_id, ps_msg):
+        return True
+
+    assert len(ps._validators) == 0
+    topic_0 = 'topic'
+    topic_1 = 'topic_123'
+    ps._validators[topic_0] = validator
+    ps._validators[topic_1] = validator
+    ps.unregister_topic_validator(topic_0)
+    assert len(ps._validators) == 1 and topic_1 in ps._validators
+    ps.unregister_topic_validator(topic_1)
+    assert len(ps._validators) == 0
+
+
+@pytest.mark.asyncio
 async def test_daemon_pubsub_subscribe(daemon_pubsubs):
     topic = "topic_123"
     assert len(await daemon_pubsubs[0].get_topics()) == 0
