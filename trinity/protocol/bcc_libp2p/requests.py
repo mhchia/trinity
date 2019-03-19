@@ -9,7 +9,7 @@ from trinity.protocol.bcc_libp2p.commands import (
 )
 
 
-class RequestRequest(BaseRequest[RequestMessage]):
+class HelloRequest(BaseRequest[RequestMessage]):
     cmd_type = Response
     response_type = Response
 

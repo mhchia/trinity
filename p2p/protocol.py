@@ -88,6 +88,7 @@ class Command:
                 raise ValueError(
                     f"Keys in data dict ({data_keys}) do not match expected keys ({expected_keys})"
                 )
+            # use the name in structure to access the data in TypedDict
             data = [data[name] for name, _ in self.structure]
         if isinstance(self.structure, sedes.CountableList):
             encoder = self.structure

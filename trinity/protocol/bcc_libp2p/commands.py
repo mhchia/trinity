@@ -38,25 +38,20 @@ MethodRequestHandler = Callable[
 ]
 
 
-class RequestBody(TypedDict):
-    pass
-
-
-class RequestMessage(TypedDict):
-    request_id: int  # uint64
-    method_id: int  # uint16
-    # body: RequestBody
-
-
-class Request(Command):
+class HelloRequest(Command):
     _cmd_id = 0
     structure = [
         ('request_id', sedes.big_endian_int),
         ('method_id', sedes.big_endian_int),
+        ('network_id', sedes.big_endian_int),
     ]
 
 
-class HelloRequestMessage(RequestBody):
+class HelloRequestMessage(TypedDict):
+    request_id: int  # uint64
+    method_id: int  # uint16
+
+    # ## body ###
     network_id: int  # uint8
     # latest_finalized_root: Hash32  # bytes32
     # latest_finalized_epoch: int  # uint64
@@ -64,30 +59,37 @@ class HelloRequestMessage(RequestBody):
     # best_slot: int  # uint64
 
 
-class ResponseBody(TypedDict):
-    pass
-
-
-class ResponseMessage(TypedDict):
-    request_id: int
-    # body: ResponseBody
-
-
-# class Error(TypedDict):
-#     code: int  # uint16
-#     data: bytes  # bytes
-
-
-# class ErrorResponseMessage(TypedDict):
-#     request_id: int
-#     error: Error
-
-
-class Response(Command):
-    _cmd_id = 0
+class HelloResponse(Command):
+    _cmd_id = 1
     structure = [
         ('request_id', sedes.big_endian_int),
-        ('method_id', sedes.big_endian_int),
+        ('network_id', sedes.big_endian_int),
+    ]
+
+
+class HelloResponseMessage(TypedDict):
+    request_id: int
+
+    # ## body ###
+    network_id: int  # uint8
+    # latest_finalized_root: Hash32  # bytes32
+    # latest_finalized_epoch: int  # uint64
+    # best_root: Hash32  # bytes32
+    # best_slot: int  # uint64
+
+
+class ErrorResponseMessage(TypedDict):
+    request_id: int
+    code: int  # uint16
+    data: bytes  # bytes
+
+
+class ErrorResponse(Command):
+    _cmd_id = 2
+    structure = [
+        ('request_id', sedes.big_endian_int),
+        ('code', sedes.big_endian_int),
+        ('data', sedes.binary),
     ]
 
 
