@@ -177,8 +177,14 @@ class MockControlClient:
         if peer_id not in self._map_peer_id_to_control_client:
             return
         peer = self._map_peer_id_to_control_client[peer_id]
-        self._peers.remove(peer_id)
-        peer._peers.remove(self._peer_id)
+        try:
+            self._peers.remove(peer_id)
+        except KeyError:
+            pass
+        try:
+            peer._peers.remove(self._peer_id)
+        except KeyError:
+            pass
 
     async def stream_open(
             self,

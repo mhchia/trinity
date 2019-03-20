@@ -4,6 +4,7 @@ from abc import (
 import asyncio
 import logging
 from typing import (
+    Any,
     Awaitable,
     Callable,
     Dict,
@@ -11,9 +12,7 @@ from typing import (
     Type,
 )
 
-from mypy_extensions import (
-    TypedDict,
-)
+import rlp
 
 from libp2p.connmgr import (
     BaseConnectionManager,
@@ -57,6 +56,7 @@ from trinity.protocol.bcc_libp2p.commands import (
     HelloResponse,
     HelloResponseMessage,
     ErrorResponse,
+    ErrorResponseMessage,
 )
 
 
@@ -65,6 +65,10 @@ logging.basicConfig(level=logging.DEBUG)
 
 PROTOCO_ETH = "/eth/serenity"
 PROTOCOL_RPC = f"{PROTOCO_ETH}/rpc/1.0.0"
+
+
+class DeserializationError(Exception):
+    pass
 
 
 class BaseNode(ABC):
@@ -155,13 +159,22 @@ class DaemonNode(BaseNode):
 
         # read response
         msg_resp_hello = await self._read_cmd_msg(reader, HelloResponse)
+        # see if the response is an error
+        if "code" in msg_resp_hello:
+            self.logger.debug(
+                f"hello is rejected by the peer {peer_info.peer_id}, "
+                f"error_code={msg_resp_hello['code']}"
+            )
+            await self.host.disconnect(peer_info.peer_id)
+            return
         if msg_resp_hello["request_id"] != request_id:
             # NOTE: this should not happen, invalid response.
             await self.host.disconnect(peer_info.peer_id)
+            return
         if msg_resp_hello["network_id"] != self.network_id:
             # NOTE: different network, disconnect
             await self.host.disconnect(peer_info.peer_id)
-
+            return
         # hello succeeds
 
     async def _handler_hello(
@@ -179,10 +192,17 @@ class DaemonNode(BaseNode):
         msg_dict_req_hello = await self._read_cmd_msg(reader, HelloRequest)
         msg_req_hello = HelloRequestMessage(**msg_dict_req_hello)
         # close the connection if the peer resides in different network
+        print(f'!@# msg_req_hello={msg_req_hello}')
         if msg_req_hello["network_id"] != self.network_id:
             await self.host.disconnect(stream_info.peer_id)
-            # TODO: write error message
-            # self._write_cmd_msg(, writer, ErrorResponse)
+            # FIXME: dummy error code and data
+            self._write_error_msg(
+                writer=writer,
+                request_id=msg_req_hello["request_id"],
+                code=777,
+                data=b"",
+            )
+            return
         # check pass, write back the response
         msg_resp_hello = HelloResponseMessage(
             request_id=msg_req_hello["request_id"],
@@ -197,26 +217,46 @@ class DaemonNode(BaseNode):
             cmd_type: Type[Command]) -> None:
         req_cmd_hello = self.cmd_by_type[cmd_type]
         req_bytes_hello = req_cmd_hello.encode_payload(msg)
-        # write line of payload
+        # write line of payload, prefixed with varint(len(payload))
         write_unsigned_varint(writer, len(req_bytes_hello))
         writer.write(req_bytes_hello)
+
+    def _write_error_msg(
+            self,
+            writer: asyncio.StreamWriter,
+            request_id: int,
+            code: int,
+            data: bytes):
+        msg_error = ErrorResponseMessage(
+            request_id=request_id,
+            code=code,
+            data=data,
+        )
+        self._write_cmd_msg(msg=msg_error, writer=writer, cmd_type=ErrorResponse)
+
+    @staticmethod
+    async def _read_msg_bytes(reader: asyncio.StreamReader) -> bytes:
+        len_payload = await read_unsigned_varint(reader)
+        payload = await reader.read(len_payload)
+        return payload
 
     async def _read_cmd_msg(
             self,
             reader: asyncio.StreamReader,
-            cmd_type: Type[Command]) -> Dict:
-        len_payload = await read_unsigned_varint(reader)
-        print(f"!@# _read_cmd_msg: len_payload={len_payload}")
-        payload = await reader.read(len_payload)
-        print(f"!@# _read_cmd_msg: payload={payload}")
+            cmd_type: Type[Command]) -> Dict[str, Any]:
+        # TODO: probably refactor to `_read_cmd_req_msg` and `_read_cmd_resp_msg`
+        payload = await self._read_msg_bytes(reader)
         cmd = self.cmd_by_type[cmd_type]
         try:
-            data = cmd.decode_payload(payload)
-        except Exception:  # FIXME: catch exact exception
-            cmd_error = self.cmd_by_type[ErrorResponse]
-            data = cmd.decode_payload(payload)
-        print(f"!@# _read_cmd_msg: data={data}")
-        return data
+            return cmd.decode_payload(payload)
+        except rlp.exceptions.DeserializationError:
+            pass
+        cmd_error = self.cmd_by_type[ErrorResponse]
+        try:
+            # another chance, possibly the response is the error message
+            return cmd_error.decode_payload(payload)
+        except rlp.exceptions.DeserializationError as e:
+            raise DeserializationError(e)
 
     async def _protocol_handler(
             self,
@@ -235,7 +275,7 @@ class DaemonNode(BaseNode):
         if method_id not in self._method_handlers:
             # reject
             print("!@# rejected")
-            pass
+            return
         print(f"!@# dispatched to method {method_id}")
         await self._method_handlers[method_id](
             stream_info=stream_info,
@@ -244,5 +284,5 @@ class DaemonNode(BaseNode):
         )
 
     def _make_request_id(self) -> int:
-        # FIXME: e.g. uuid int
+        # FIXME: e.g. use uuid int
         return 1
