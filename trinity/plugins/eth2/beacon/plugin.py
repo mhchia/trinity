@@ -11,6 +11,9 @@ from trinity._utils.shutdown import (
 from trinity.config import BeaconAppConfig
 from trinity.endpoint import TrinityEventBusEndpoint
 from trinity.extensibility import BaseIsolatedPlugin
+from trinity.plugins.eth2.beacon.beacon_node_bridge import (
+    BeaconNodeEventBusHandler,
+)
 from trinity.server import BCCServer
 from trinity.sync.beacon.chain import BeaconChainSyncer
 
@@ -20,6 +23,8 @@ from trinity.db.beacon.manager import (
 
 
 class BeaconNodePlugin(BaseIsolatedPlugin):
+
+    handler: BeaconNodeEventBusHandler
 
     @property
     def name(self) -> str:
@@ -47,7 +52,7 @@ class BeaconNodePlugin(BaseIsolatedPlugin):
         base_db = db_manager.get_db()  # type: ignore
         chain_db = db_manager.get_chaindb()  # type: ignore
         chain_config = beacon_config.get_chain_config()
-        chain = chain_config.beacon_chain_class(base_db)
+        chain = chain_config.initialize_chain(base_db)
 
         if self.context.args.beacon_nodekey:
             from eth_keys.datatypes import PrivateKey
@@ -69,16 +74,24 @@ class BeaconNodePlugin(BaseIsolatedPlugin):
             event_bus=self.context.event_bus,
             token=None,
         )
+        self.handler = BeaconNodeEventBusHandler(server, self.context.event_bus)
+        print(f"!@# self.context.event_bus.name = {self.context.event_bus.name}")
 
         syncer = BeaconChainSyncer(
             chain_db,
             server.peer_pool,
             server.cancel_token,
         )
+        slot = SlotTicker
+        if args.validator:
+            validator = Validator
 
         loop = asyncio.get_event_loop()
         asyncio.ensure_future(exit_with_service_and_endpoint(server, self.context.event_bus))
         asyncio.ensure_future(server.run())
+        asyncio.ensure_future(self.handler.run())
+        if args.validator:
+            asyncio.ensure_future(validator.run())
         asyncio.ensure_future(syncer.run())
         loop.run_forever()
         loop.close()

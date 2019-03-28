@@ -127,6 +127,7 @@ class BasePeerPool(BaseService, AsyncIterable[BasePeer]):
             available_peer_slots = self.max_peers - len(self)
             if available_peer_slots > 0:
                 try:
+                    print("!@# peer_pool::event_bus.request")
                     response = await self.wait(
                         self.event_bus.request(
                             PeerCandidatesRequest(available_peer_slots),
