@@ -93,13 +93,13 @@ class EventBusBeaconNode:
         # My own guess: it seems we need to wait until the `event_bus` are connected, to ensure
         #   `event_bus.request` works? Need to investigate deeper.
 
-        # while True:
-        #     if self.event_bus.is_connected_to('bbeacon-node'):
-        #         print("!@# connected to `bbeacon-node`")
-        #         break
-        #     else:
-        #         print("!@# not connected to `bbeacon-node`, wait")
-        #     await asyncio.sleep(1)
+        while True:
+            if self.event_bus.is_connected_to('bbeacon-node'):
+                print("!@# connected to `bbeacon-node`")
+                break
+            else:
+                print("!@# not connected to `bbeacon-node`, wait")
+            await asyncio.sleep(0.01)
 
         resp = await self.event_bus.request(
             event,
