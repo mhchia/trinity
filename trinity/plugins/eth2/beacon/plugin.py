@@ -82,16 +82,16 @@ class BeaconNodePlugin(BaseIsolatedPlugin):
             server.peer_pool,
             server.cancel_token,
         )
-        slot = SlotTicker
-        if args.validator:
-            validator = Validator
+        # slot = SlotTicker
+        # if args.validator:
+        #     validator = Validator
 
         loop = asyncio.get_event_loop()
         asyncio.ensure_future(exit_with_service_and_endpoint(server, self.context.event_bus))
         asyncio.ensure_future(server.run())
         asyncio.ensure_future(self.handler.run())
-        if args.validator:
-            asyncio.ensure_future(validator.run())
+        # if args.validator:
+        #     asyncio.ensure_future(validator.run())
         asyncio.ensure_future(syncer.run())
         loop.run_forever()
         loop.close()
