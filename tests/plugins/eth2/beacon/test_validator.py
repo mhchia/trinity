@@ -1,6 +1,10 @@
 import asyncio
 from pathlib import Path
 import uuid
+import time
+from typing import (
+    cast,
+)
 
 import pytest
 
@@ -20,8 +24,24 @@ from trinity.plugins.eth2.beacon.validator import (
     Validator,
 )
 
+from eth.db.atomic import (
+    AtomicDB,
+)
+
+from eth2.beacon.db.chain import (
+    BeaconChainDB,
+)
 from eth2.beacon._utils.hash import (
     hash_eth2,
+)
+from eth2.beacon.state_machines.forks.serenity.blocks import (
+    SerenityBeaconBlock,
+)
+from eth2.beacon.state_machines.forks.xiao_long_bao.configs import (
+    XIAO_LONG_BAO_CONFIG,
+)
+from eth2.beacon.tools.builder.initializer import (
+    create_mock_genesis,
 )
 
 from trinity.constants import (
@@ -33,7 +53,7 @@ from trinity.endpoint import (
 
 from .helpers import (
     get_directly_linked_peers_in_peer_pools,
-    get_genesis_chain_db,
+    get_chain_db,
 )
 
 
@@ -51,6 +71,35 @@ for i, k in enumerate(privkeys):
 
 pubkeys = list(keymap)
 
+genesis_state, genesis_block = create_mock_genesis(
+    num_validators=NUM_VALIDATORS,
+    config=XIAO_LONG_BAO_CONFIG,
+    keymap=keymap,
+    genesis_block_class=SerenityBeaconBlock,
+    genesis_time=int(time.time()),
+)
+
+
+# config = XIAO_LONG_BAO_CONFIG
+
+# # Only used for testing
+# num_validators = 10
+# privkeys = tuple(2 ** i for i in range(num_validators))
+# keymap = {}
+# for k in privkeys:
+#     keymap[bls.privtopub(k)] = k
+# state, block = create_mock_genesis(
+#     num_validators=num_validators,
+#     config=config,
+#     keymap=keymap,
+#     genesis_block_class=SerenityBeaconBlock,
+#     genesis_time=ZERO_TIMESTAMP,
+# )
+# return cast('BeaconChain', self.beacon_chain_class.from_genesis(
+#     base_db=base_db,
+#     genesis_state=state,
+#     genesis_block=block,
+# ))
 
 # class FakePeer:
 #     def __init__(self):
@@ -87,41 +136,43 @@ async def get_event_bus(event_loop):
     return endpoint
 
 
-async def get_validator(request, event_loop, index, peer_pool=None, db=None) -> Validator:
+def get_chain(db):
     beacon_chain_config = BeaconChainConfig('TestTestTest')
     chain_class = beacon_chain_config.beacon_chain_class
-    chain = chain_class(db)
-    return Validator(
-        validator_index=index,
-        chain=chain,
-        peer_pool=peer_pool,
-        privkey=keymap[index_to_pubkey[index]],
-        event_bus=await get_event_bus(event_loop),
+    return chain_class.from_genesis(
+        base_db=db,
+        genesis_state=genesis_state,
+        genesis_block=genesis_block,
     )
 
 
 async def get_linked_validators(request, event_loop):
-    alice_chain_db = await get_genesis_chain_db()
-    bob_chain_db = await get_genesis_chain_db()
+    alice_chain_db = await get_chain_db()
+    alice_chain = get_chain(alice_chain_db.db)
+    alice_index = 0
+    bob_chain_db = await get_chain_db()
+    bob_chain = get_chain(bob_chain_db.db)
+    bob_index = 1
+    # bob_chain_db = BeaconChainDB(AtomicDB())
     alice, alice_peer_pool, bob, bob_peer_pool = await get_directly_linked_peers_in_peer_pools(
         request,
         event_loop,
         alice_chain_db=alice_chain_db,
         bob_chain_db=bob_chain_db,
     )
-    alice_validator = await get_validator(
-        request=request,
-        event_loop=event_loop,
-        index=0,
+    alice_validator = Validator(
+        validator_index=alice_index,
+        chain=alice_chain,
         peer_pool=alice_peer_pool,
-        db=alice_chain_db.db,
+        privkey=keymap[index_to_pubkey[alice_index]],
+        event_bus=await get_event_bus(event_loop),
     )
-    bob_validator = await get_validator(
-        request=request,
-        event_loop=event_loop,
-        index=1,
+    bob_validator = Validator(
+        validator_index=bob_index,
+        chain=bob_chain,
         peer_pool=bob_peer_pool,
-        db=bob_chain_db.db,
+        privkey=keymap[index_to_pubkey[bob_index]],
+        event_bus=await get_event_bus(event_loop),
     )
     return alice_validator, bob_validator
 
