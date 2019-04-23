@@ -56,8 +56,9 @@ privkeys = tuple(int.from_bytes(
 index_to_pubkey = {}
 keymap = {}  # pub -> priv
 for i, k in enumerate(privkeys):
-    index_to_pubkey[i] = bls.privtopub(k)
-    keymap[bls.privtopub(k)] = k
+    pubkey = bls.privtopub(k)
+    index_to_pubkey[i] = pubkey
+    keymap[pubkey] = k
 
 genesis_time = int(time.time())
 
@@ -147,7 +148,7 @@ async def test_validator_propose_block(caplog, event_loop, event_bus):
     # test: ensure the proposed block is saved to the chaindb
     assert alice.chain.get_block_by_root(block.signed_root) == block
 
-    # TODO: test: `canonical_head` shoul change after proposing?
+    # TODO: test: `canonical_head` should change after proposing?
     # new_head = alice.chain.get_canonical_head()
     # assert new_head != head
 
