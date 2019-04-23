@@ -139,21 +139,49 @@ async def test_validator_propose_block(caplog, event_loop, event_bus):
     head = alice.chain.get_canonical_head()
     state_machine = alice.chain.get_state_machine()
     state = state_machine.state
-    block = alice.propose_block(
-        slot=state.slot,  # FIXME: unsure which slot should be used here.
-        state=state,
-        state_machine=state_machine,
-        head_block=head,
-    )
-    # test: ensure the proposed block is saved to the chaindb
-    assert alice.chain.get_block_by_root(block.signed_root) == block
-
-    # TODO: test: `canonical_head` should change after proposing?
-    # new_head = alice.chain.get_canonical_head()
-    # assert new_head != head
-
-    # test: ensure the block is broadcast to bob
-    assert block in alice.peer_pool.connected_nodes[bob.validator_index].sub_proto.inbox
+    next_slot = state.slot + 1
+    while True:
+        proposer_index = _get_proposer_index(
+            state,
+            next_slot,
+            state_machine.config,
+        )
+        if proposer_index == alice.validator_index:
+            block = alice.propose_block(
+                slot=next_slot,
+                state=state,
+                state_machine=state_machine,
+                head_block=head,
+            )
+            # test: ensure the proposed block is saved to the chaindb
+            assert alice.chain.get_block_by_root(block.signed_root) == block
+            
+            # TODO: test: `canonical_head` should change after proposing?
+            # new_head = alice.chain.get_canonical_head()
+            # assert new_head != head
+    
+            # test: ensure the block is broadcast to bob
+            assert block in alice.peer_pool.connected_nodes[bob.validator_index].sub_proto.inbox
+            break
+        elif proposer_index == bob.validator_index:
+            block = bob.propose_block(
+                slot=next_slot,
+                state=state,
+                state_machine=state_machine,
+                head_block=head,
+            )
+            # test: ensure the proposed block is saved to the chaindb
+            assert bob.chain.get_block_by_root(block.signed_root) == block
+            
+            # TODO: test: `canonical_head` should change after proposing?
+            # new_head = alice.chain.get_canonical_head()
+            # assert new_head != head
+    
+            # test: ensure the block is broadcast to bob
+            assert block in bob.peer_pool.connected_nodes[alice.validator_index].sub_proto.inbox
+            break
+        else:
+            next_slot += 1
 
 
 @pytest.mark.asyncio
