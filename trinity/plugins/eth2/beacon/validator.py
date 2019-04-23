@@ -4,6 +4,9 @@ from cancel_token import (
     CancelToken,
 )
 
+from eth_typing import (
+    Hash32,
+)
 from eth_keys.datatypes import PrivateKey
 
 from eth2.beacon.chains.base import BeaconChain
@@ -80,12 +83,11 @@ class Validator(BaseService):
             bold_green(f"head: slot={head.slot}, state root={head.state_root}")
         )
         proposer_index = _get_proposer_index(
-            state_machine,
             state,
             slot,
-            head.root,
             state_machine.config,
         )
+        print(f"!@# proposer_index={proposer_index}")
         if self.validator_index == proposer_index:
             self.propose_block(
                 slot=slot,
@@ -98,24 +100,24 @@ class Validator(BaseService):
                 slot=slot,
                 state=state,
                 state_machine=state_machine,
-                parent_block=head,
             )
 
     def propose_block(self,
                       slot: int,
                       state: BeaconState,
                       state_machine: BaseBeaconStateMachine,
-                      head_block: BaseBeaconBlock) -> None:
+                      head_block: BaseBeaconBlock) -> BaseBeaconBlock:
         block = self._make_proposing_block(slot, state, state_machine, head_block)
         self.logger.debug(
             bold_green(f"proposing block, block={block}")
         )
-        for _, peer in enumerate(self.peer_pool.connected_nodes.values()):
+        for peer in self.peer_pool.connected_nodes.values():
             self.logger.debug(
                 bold_red(f"sending block to peer={peer}")
             )
             peer.sub_proto.send_new_block(block)
         self.chain.import_block(block)
+        return block
 
     def _make_proposing_block(self,
                               slot: int,
@@ -138,15 +140,13 @@ class Validator(BaseService):
     def skip_block(self,
                    slot: int,
                    state: BeaconState,
-                   state_machine: BaseBeaconStateMachine,
-                   parent_block: BaseBeaconBlock) -> None:
+                   state_machine: BaseBeaconStateMachine) -> Hash32:
         post_state = state_machine.state_transition.apply_state_transition_without_block(
             state,
             # TODO: Change back to `slot` instead of `slot + 1`.
             # Currently `apply_state_transition_without_block` only returns the post state
             # of `slot - 1`, so we increment it by one to get the post state of `slot`.
             slot + 1,
-            parent_block.root,
         )
         self.logger.debug(
             bold_green(f"skipping block, post state={post_state.root}")
@@ -154,3 +154,4 @@ class Validator(BaseService):
         # FIXME: We might not need to persist state for skip slots since `create_block_on_state`
         # will run the state transition which also includes the state transition for skipped slots.
         self.chain.chaindb.persist_state(post_state)
+        return post_state.root

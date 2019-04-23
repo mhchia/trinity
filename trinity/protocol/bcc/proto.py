@@ -40,8 +40,8 @@ if TYPE_CHECKING:
 class BCCProtocol(HasExtendedDebugLogger, Protocol):
     name = "bcc"
     version = 0
-    _commands = [Status, GetBeaconBlocks, BeaconBlocks, AttestationRecords]
-    cmd_length = 4
+    _commands = [Status, GetBeaconBlocks, BeaconBlocks, AttestationRecords, NewBeaconBlock]
+    cmd_length = 5
 
     peer: "BCCPeer"
 

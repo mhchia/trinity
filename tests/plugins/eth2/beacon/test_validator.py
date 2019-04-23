@@ -1,9 +1,8 @@
 import asyncio
-from pathlib import Path
-import uuid
+import logging
 import time
 from typing import (
-    cast,
+    Tuple,
 )
 
 import pytest
@@ -11,31 +10,24 @@ import pytest
 from py_ecc import bls
 
 from lahja import (
-    ConnectionConfig,
+    BroadcastConfig,
 )
 
-from eth.db.atomic import AtomicDB
-
-from eth2.beacon.db.chain import BeaconChainDB
-from trinity.db.beacon.chain import BaseAsyncBeaconChainDB
+from eth.exceptions import BlockNotFound
 
 from trinity.config import BeaconChainConfig
 from trinity.plugins.eth2.beacon.validator import (
     Validator,
 )
 
-from eth.db.atomic import (
-    AtomicDB,
-)
-
-from eth2.beacon.db.chain import (
-    BeaconChainDB,
-)
 from eth2.beacon._utils.hash import (
     hash_eth2,
 )
 from eth2.beacon.state_machines.forks.serenity.blocks import (
     SerenityBeaconBlock,
+)
+from eth2.beacon.state_machines.forks.serenity.configs import (
+    SERENITY_CONFIG,
 )
 from eth2.beacon.state_machines.forks.xiao_long_bao.configs import (
     XIAO_LONG_BAO_CONFIG,
@@ -43,21 +35,19 @@ from eth2.beacon.state_machines.forks.xiao_long_bao.configs import (
 from eth2.beacon.tools.builder.initializer import (
     create_mock_genesis,
 )
-
-from trinity.constants import (
-    NETWORKING_EVENTBUS_ENDPOINT,
+from eth2.beacon.tools.builder.proposer import (
+    _get_proposer_index,
 )
-from trinity.endpoint import (
-    TrinityEventBusEndpoint,
+from trinity.plugins.eth2.beacon.slot_ticker import (
+    NewSlotEvent,
 )
 
 from .helpers import (
-    get_directly_linked_peers_in_peer_pools,
     get_chain_db,
 )
 
 
-NUM_VALIDATORS = 2
+NUM_VALIDATORS = 8
 
 privkeys = tuple(int.from_bytes(
     hash_eth2(str(i).encode('utf-8'))[:4], 'big')
@@ -69,71 +59,37 @@ for i, k in enumerate(privkeys):
     index_to_pubkey[i] = bls.privtopub(k)
     keymap[bls.privtopub(k)] = k
 
-pubkeys = list(keymap)
+genesis_time = int(time.time())
 
 genesis_state, genesis_block = create_mock_genesis(
     num_validators=NUM_VALIDATORS,
     config=XIAO_LONG_BAO_CONFIG,
+    # config=SERENITY_CONFIG,
     keymap=keymap,
     genesis_block_class=SerenityBeaconBlock,
-    genesis_time=int(time.time()),
+    genesis_time=genesis_time,
 )
 
 
-# config = XIAO_LONG_BAO_CONFIG
+class FakeProtocol:
+    def __init__(self):
+        self.inbox = []
 
-# # Only used for testing
-# num_validators = 10
-# privkeys = tuple(2 ** i for i in range(num_validators))
-# keymap = {}
-# for k in privkeys:
-#     keymap[bls.privtopub(k)] = k
-# state, block = create_mock_genesis(
-#     num_validators=num_validators,
-#     config=config,
-#     keymap=keymap,
-#     genesis_block_class=SerenityBeaconBlock,
-#     genesis_time=ZERO_TIMESTAMP,
-# )
-# return cast('BeaconChain', self.beacon_chain_class.from_genesis(
-#     base_db=base_db,
-#     genesis_state=state,
-#     genesis_block=block,
-# ))
-
-# class FakePeer:
-#     def __init__(self):
-#         pass
-
-#     def sub_proto(self):
-#         pass
+    def send_new_block(self, block):
+        self.inbox.append(block)
 
 
-# class FakeProtocol:
-#     def send_new_block(self, block):
-#         pass
+class FakePeer:
+    def __init__(self):
+        self.sub_proto = FakeProtocol()
 
 
-# class FakePeerPool:
-#     def __init__(self):
-#         self._connected_nodes = {}
+class FakePeerPool:
+    def __init__(self):
+        self.connected_nodes = {}
 
-#     @property
-#     def connected_nodes(self):
-#         return self._connected_nodes
-
-
-async def get_event_bus(event_loop):
-    endpoint = TrinityEventBusEndpoint()
-    # Tests run concurrently, therefore we need unique IPC paths
-    ipc_path = Path(f"networking-{uuid.uuid4()}.ipc")
-    networking_connection_config = ConnectionConfig(
-        name=NETWORKING_EVENTBUS_ENDPOINT,
-        path=ipc_path
-    )
-    await endpoint.start_serving(networking_connection_config, event_loop)
-    await endpoint.connect_to_endpoints(networking_connection_config)
-    return endpoint
+    def add_peer(self, index):
+        self.connected_nodes[index] = FakePeer()
 
 
 def get_chain(db):
@@ -146,63 +102,136 @@ def get_chain(db):
     )
 
 
-async def get_linked_validators(request, event_loop):
-    alice_chain_db = await get_chain_db()
-    alice_chain = get_chain(alice_chain_db.db)
+async def get_validator(event_loop, event_bus, index) -> Validator:
+    chain_db = await get_chain_db()
+    chain = get_chain(chain_db.db)
+    peer_pool = FakePeerPool()
+    v = Validator(
+        validator_index=index,
+        chain=chain,
+        peer_pool=peer_pool,
+        privkey=keymap[index_to_pubkey[index]],
+        event_bus=event_bus,
+    )
+    asyncio.ensure_future(v.run(), loop=event_loop)
+    await v.events.started.wait()
+    # yield to `validator._run`
+    await asyncio.sleep(0)
+    return v
+
+
+async def get_linked_validators(event_loop, event_bus) -> Tuple[Validator, Validator]:
     alice_index = 0
-    bob_chain_db = await get_chain_db()
-    bob_chain = get_chain(bob_chain_db.db)
     bob_index = 1
-    # bob_chain_db = BeaconChainDB(AtomicDB())
-    alice, alice_peer_pool, bob, bob_peer_pool = await get_directly_linked_peers_in_peer_pools(
-        request,
-        event_loop,
-        alice_chain_db=alice_chain_db,
-        bob_chain_db=bob_chain_db,
-    )
-    alice_validator = Validator(
-        validator_index=alice_index,
-        chain=alice_chain,
-        peer_pool=alice_peer_pool,
-        privkey=keymap[index_to_pubkey[alice_index]],
-        event_bus=await get_event_bus(event_loop),
-    )
-    bob_validator = Validator(
-        validator_index=bob_index,
-        chain=bob_chain,
-        peer_pool=bob_peer_pool,
-        privkey=keymap[index_to_pubkey[bob_index]],
-        event_bus=await get_event_bus(event_loop),
-    )
-    return alice_validator, bob_validator
+    alice = await get_validator(event_loop, event_bus, alice_index)
+    bob = await get_validator(event_loop, event_bus, bob_index)
+    alice.peer_pool.add_peer(bob_index)
+    bob.peer_pool.add_peer(alice_index)
+    return alice, bob
 
 
 @pytest.mark.asyncio
-async def test_validator_run(request, event_loop):
-    alice_validator, bob_validator = await get_linked_validators(request, event_loop)
-    asyncio.ensure_future(alice_validator.run(), loop=event_loop)
-    asyncio.ensure_future(bob_validator.run(), loop=event_loop)
+async def test_validator_propose_block(caplog, event_loop, event_bus):
+    caplog.set_level(logging.DEBUG)
+    alice, bob = await get_linked_validators(event_loop=event_loop, event_bus=event_bus)
 
-    await alice_validator.events.started.wait()
-    await bob_validator.events.started.wait()
-
-
-@pytest.mark.asyncio
-async def test_validator_propose_block(request, event_loop):
-    alice_validator, bob_validator = await get_linked_validators(request, event_loop)
-    asyncio.ensure_future(alice_validator.run(), loop=event_loop)
-    asyncio.ensure_future(bob_validator.run(), loop=event_loop)
-
-    await alice_validator.events.started.wait()
-    await bob_validator.events.started.wait()
-
-    head = alice_validator.chain.get_canonical_head()
-    print(f"!@# head={head.slot}")
-    state_machine = alice_validator.chain.get_state_machine(at_block=head)
+    head = alice.chain.get_canonical_head()
+    state_machine = alice.chain.get_state_machine()
     state = state_machine.state
-    alice_validator.propose_block(
-        slot=0,
+    block = alice.propose_block(
+        slot=state.slot,  # FIXME: unsure which slot should be used here.
         state=state,
         state_machine=state_machine,
         head_block=head,
+    )
+    # test: ensure the proposed block is saved to the chaindb
+    assert alice.chain.get_block_by_root(block.signed_root) == block
+
+    # TODO: test: `canonical_head` shoul change after proposing?
+    # new_head = alice.chain.get_canonical_head()
+    # assert new_head != head
+
+    # test: ensure the block is broadcast to bob
+    assert block in alice.peer_pool.connected_nodes[bob.validator_index].sub_proto.inbox
+
+
+@pytest.mark.asyncio
+async def test_validator_skip_block(caplog, event_loop, event_bus):
+    caplog.set_level(logging.DEBUG)
+    alice = await get_validator(event_loop=event_loop, event_bus=event_bus, index=0)
+    state_machine = alice.chain.get_state_machine()
+    state = state_machine.state
+    slot = state.slot + 1  # FIXME: unsure which slot should be used here.
+    root_post_state = alice.skip_block(
+        slot=slot,
+        state=state,
+        state_machine=state_machine,
+    )
+    with pytest.raises(BlockNotFound):
+        alice.chain.get_canonical_block_by_slot(slot)
+    assert state.root != root_post_state
+    # TODO: more tests
+
+
+@pytest.mark.asyncio
+async def test_validator_new_slot(caplog, event_loop, event_bus, monkeypatch):
+    caplog.set_level(logging.DEBUG)
+    alice = await get_validator(event_loop=event_loop, event_bus=event_bus, index=0)
+    state_machine = alice.chain.get_state_machine()
+    state = state_machine.state
+    new_slot = state.slot - 1  # FIXME: unsure which slot should be used here.
+    index = _get_proposer_index(
+        state,
+        new_slot,
+        state_machine.config,
+    )
+
+    is_proposing = True
+
+    def propose_block(slot, state, state_machine, head_block):
+        nonlocal is_proposing
+        is_proposing = True
+
+    def skip_block(slot, state, state_machine):
+        nonlocal is_proposing
+        is_proposing = False
+
+    monkeypatch.setattr(alice, 'propose_block', propose_block)
+    monkeypatch.setattr(alice, 'skip_block', skip_block)
+
+    await alice.new_slot(new_slot)
+
+    # test: either `propose_block` or `skip_block` should be called.
+    assert is_proposing is not None
+    if alice.validator_index == index:
+        assert is_proposing
+    else:
+        assert not is_proposing
+
+
+@pytest.mark.asyncio
+async def test_validator_handle_new_slot(caplog, event_loop, event_bus, monkeypatch):
+    alice = await get_validator(event_loop=event_loop, event_bus=event_bus, index=0)
+
+    event_new_slot_called = asyncio.Event()
+
+    async def new_slot(slot):
+        event_new_slot_called.set()
+
+    monkeypatch.setattr(alice, 'new_slot', new_slot)
+
+    # sleep for `event_bus` ready
+    await asyncio.sleep(0.01)
+
+    event_bus.broadcast(
+        NewSlotEvent(
+            slot=1,
+            elapsed_time=2,
+        ),
+        BroadcastConfig(internal=True),
+    )
+    await asyncio.wait_for(
+        event_new_slot_called.wait(),
+        timeout=2,
+        loop=event_loop,
     )
