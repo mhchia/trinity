@@ -26,14 +26,8 @@ from trinity.plugins.eth2.beacon.validator import (
 from eth2.beacon._utils.hash import (
     hash_eth2,
 )
-from eth2.beacon.state_machines.forks.serenity.blocks import (
-    SerenityBeaconBlock,
-)
 from eth2.beacon.state_machines.forks.xiao_long_bao.configs import (
     XIAO_LONG_BAO_CONFIG,
-)
-from eth2.beacon.tools.builder.initializer import (
-    create_mock_genesis,
 )
 from eth2.beacon.tools.builder.proposer import (
     _get_proposer_index,
@@ -62,14 +56,6 @@ for i, k in enumerate(privkeys):
 
 genesis_time = int(time.time())
 
-genesis_state, genesis_block = create_mock_genesis(
-    num_validators=NUM_VALIDATORS,
-    config=XIAO_LONG_BAO_CONFIG,
-    keymap=keymap,
-    genesis_block_class=SerenityBeaconBlock,
-    genesis_time=genesis_time,
-)
-
 
 class FakeProtocol:
     def __init__(self):
@@ -96,15 +82,14 @@ def get_chain(db):
     genesis_data = BeaconGenesisData(
         genesis_time=genesis_time,
         genesis_slot=XIAO_LONG_BAO_CONFIG.GENESIS_SLOT,
+        keymap=keymap,
         num_validators=NUM_VALIDATORS,
     )
-    beacon_chain_config = BeaconChainConfig(chain_name='TestTestTest', genesis_data=genesis_data)
-    chain_class = beacon_chain_config.beacon_chain_class
-    return chain_class.from_genesis(
-        base_db=db,
-        genesis_state=genesis_state,
-        genesis_block=genesis_block,
+    beacon_chain_config = BeaconChainConfig(
+        chain_name='TestTestTest',
+        genesis_data=genesis_data,
     )
+    return beacon_chain_config.initialize_chain(base_db=db)
 
 
 async def get_validator(event_loop, event_bus, index) -> Validator:

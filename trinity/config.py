@@ -25,6 +25,7 @@ from typing import (
 
 from eth_typing import (
     Address,
+    BLSPubkey,
 )
 
 from eth_keys import keys
@@ -586,7 +587,9 @@ class Eth1AppConfig(BaseAppConfig):
 class BeaconGenesisData(NamedTuple):
     genesis_time: Timestamp
     genesis_slot: Slot
+    keymap: Dict[BLSPubkey, int]
     num_validators: int
+    # TODO: Maybe Validator deposit data
 
 
 class BeaconChainConfig:
@@ -629,7 +632,7 @@ class BeaconChainConfig:
         state, block = create_mock_genesis(
             num_validators=self.genesis_data.num_validators,
             config=state_machine.config,
-            keymap=self.genesis_data.keymap,  # FIXME: mypy complains that `genesis_data` does not have `keymap`  # noqa: E501
+            keymap=self.genesis_data.keymap,
             genesis_block_class=state_machine.block_class,
             genesis_time=self.genesis_time,
         )
