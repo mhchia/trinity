@@ -599,11 +599,11 @@ class BeaconChainConfig:
         self._beacon_chain_class = None
 
     @property
-    def genesis_time(self):
+    def genesis_time(self) -> Timestamp:
         return self.genesis_data.genesis_time
 
     @property
-    def genesis_slot(self):
+    def genesis_slot(self) -> Slot:
         return self.genesis_data.genesis_slot
 
     @property
@@ -629,7 +629,7 @@ class BeaconChainConfig:
         state, block = create_mock_genesis(
             num_validators=self.genesis_data.num_validators,
             config=state_machine.config,
-            keymap=self.genesis_data.keymap,
+            keymap=self.genesis_data.keymap,  # FIXME: mypy complains that `genesis_data` does not have `keymap`  # noqa: E501
             genesis_block_class=state_machine.block_class,
             genesis_time=self.genesis_time,
         )

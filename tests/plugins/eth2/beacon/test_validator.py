@@ -15,7 +15,10 @@ from lahja import (
 
 from eth.exceptions import BlockNotFound
 
-from trinity.config import BeaconChainConfig
+from trinity.config import (
+    BeaconChainConfig,
+    BeaconGenesisData,
+)
 from trinity.plugins.eth2.beacon.validator import (
     Validator,
 )
@@ -62,7 +65,6 @@ genesis_time = int(time.time())
 genesis_state, genesis_block = create_mock_genesis(
     num_validators=NUM_VALIDATORS,
     config=XIAO_LONG_BAO_CONFIG,
-    # config=SERENITY_CONFIG,
     keymap=keymap,
     genesis_block_class=SerenityBeaconBlock,
     genesis_time=genesis_time,
@@ -91,7 +93,12 @@ class FakePeerPool:
 
 
 def get_chain(db):
-    beacon_chain_config = BeaconChainConfig('TestTestTest')
+    genesis_data = BeaconGenesisData(
+        genesis_time=genesis_time,
+        genesis_slot=XIAO_LONG_BAO_CONFIG.GENESIS_SLOT,
+        num_validators=NUM_VALIDATORS,
+    )
+    beacon_chain_config = BeaconChainConfig(chain_name='TestTestTest', genesis_data=genesis_data)
     chain_class = beacon_chain_config.beacon_chain_class
     return chain_class.from_genesis(
         base_db=db,

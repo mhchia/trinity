@@ -1,4 +1,7 @@
 import logging
+from typing import (
+    cast,
+)
 
 from cancel_token import (
     CancelToken,
@@ -20,9 +23,16 @@ from eth2.beacon.tools.builder.proposer import (
 )
 from eth2.beacon.types.blocks import BaseBeaconBlock
 from eth2.beacon.types.states import BeaconState
+from eth2.beacon.typing import (
+    Slot,
+    ValidatorIndex,
+)
 
 from trinity.endpoint import TrinityEventBusEndpoint
-from trinity.protocol.bcc.peer import BCCPeerPool
+from trinity.protocol.bcc.peer import (
+    BCCPeer,
+    BCCPeerPool,
+)
 from trinity.plugins.eth2.beacon.slot_ticker import (
     NewSlotEvent,
 )
@@ -39,7 +49,7 @@ class Validator(BaseService):
     Reference: https://github.com/ethereum/trinity/blob/master/eth2/beacon/tools/builder/proposer.py#L175  # noqa: E501
     """
 
-    validator_index: int
+    validator_index: ValidatorIndex
     chain: BeaconChain
     peer_pool: BCCPeerPool
     privkey: PrivateKey
@@ -49,7 +59,7 @@ class Validator(BaseService):
 
     def __init__(
             self,
-            validator_index: int,
+            validator_index: ValidatorIndex,
             chain: BeaconChain,
             peer_pool: BCCPeerPool,
             privkey: PrivateKey,
@@ -75,7 +85,7 @@ class Validator(BaseService):
         async for event in self.event_bus.stream(NewSlotEvent):
             await self.new_slot(event.slot)
 
-    async def new_slot(self, slot: int) -> None:
+    async def new_slot(self, slot: Slot) -> None:
         head = self.chain.get_canonical_head()
         state_machine = self.chain.get_state_machine()
         state = state_machine.state
@@ -87,7 +97,6 @@ class Validator(BaseService):
             slot,
             state_machine.config,
         )
-        print(f"!@# proposer_index={proposer_index}")
         if self.validator_index == proposer_index:
             self.propose_block(
                 slot=slot,
@@ -103,7 +112,7 @@ class Validator(BaseService):
             )
 
     def propose_block(self,
-                      slot: int,
+                      slot: Slot,
                       state: BeaconState,
                       state_machine: BaseBeaconStateMachine,
                       head_block: BaseBeaconBlock) -> BaseBeaconBlock:
@@ -112,6 +121,7 @@ class Validator(BaseService):
             bold_green(f"proposing block, block={block}")
         )
         for peer in self.peer_pool.connected_nodes.values():
+            peer = cast(BCCPeer, peer)
             self.logger.debug(
                 bold_red(f"sending block to peer={peer}")
             )
@@ -120,7 +130,7 @@ class Validator(BaseService):
         return block
 
     def _make_proposing_block(self,
-                              slot: int,
+                              slot: Slot,
                               state: BeaconState,
                               state_machine: BaseBeaconStateMachine,
                               parent_block: BaseBeaconBlock) -> BaseBeaconBlock:
@@ -138,7 +148,7 @@ class Validator(BaseService):
         )
 
     def skip_block(self,
-                   slot: int,
+                   slot: Slot,
                    state: BeaconState,
                    state_machine: BaseBeaconStateMachine) -> Hash32:
         post_state = state_machine.state_transition.apply_state_transition_without_block(
@@ -146,7 +156,7 @@ class Validator(BaseService):
             # TODO: Change back to `slot` instead of `slot + 1`.
             # Currently `apply_state_transition_without_block` only returns the post state
             # of `slot - 1`, so we increment it by one to get the post state of `slot`.
-            slot + 1,
+            cast(Slot, slot + 1),
         )
         self.logger.debug(
             bold_green(f"skipping block, post state={post_state.root}")
