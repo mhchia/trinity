@@ -26,9 +26,6 @@ from eth2.beacon._utils.hash import (
 from eth2.beacon.state_machines.forks.serenity.blocks import (
     SerenityBeaconBlock,
 )
-from eth2.beacon.state_machines.forks.serenity.configs import (
-    SERENITY_CONFIG,
-)
 from eth2.beacon.state_machines.forks.xiao_long_bao.configs import (
     XIAO_LONG_BAO_CONFIG,
 )
@@ -155,11 +152,11 @@ async def test_validator_propose_block(caplog, event_loop, event_bus):
             )
             # test: ensure the proposed block is saved to the chaindb
             assert alice.chain.get_block_by_root(block.signed_root) == block
-            
+
             # TODO: test: `canonical_head` should change after proposing?
             # new_head = alice.chain.get_canonical_head()
             # assert new_head != head
-    
+
             # test: ensure the block is broadcast to bob
             assert block in alice.peer_pool.connected_nodes[bob.validator_index].sub_proto.inbox
             break
@@ -172,11 +169,11 @@ async def test_validator_propose_block(caplog, event_loop, event_bus):
             )
             # test: ensure the proposed block is saved to the chaindb
             assert bob.chain.get_block_by_root(block.signed_root) == block
-            
+
             # TODO: test: `canonical_head` should change after proposing?
             # new_head = alice.chain.get_canonical_head()
             # assert new_head != head
-    
+
             # test: ensure the block is broadcast to bob
             assert block in bob.peer_pool.connected_nodes[alice.validator_index].sub_proto.inbox
             break
