@@ -5,13 +5,15 @@ from typing import (
     Tuple,
 )
 
-import pytest
-
-from py_ecc import bls
+from eth_utils.exceptions import ValidationError
 
 from lahja import (
     BroadcastConfig,
 )
+
+import pytest
+
+from py_ecc import bls
 
 from eth.exceptions import BlockNotFound
 
@@ -136,57 +138,92 @@ async def get_linked_validators(event_loop, event_bus) -> Tuple[Validator, Valid
     return alice, bob
 
 
-@pytest.mark.asyncio
-async def test_validator_propose_block(caplog, event_loop, event_bus):
-    caplog.set_level(logging.DEBUG)
-    alice, bob = await get_linked_validators(event_loop=event_loop, event_bus=event_bus)
-
-    head = alice.chain.get_canonical_head()
-    state_machine = alice.chain.get_state_machine()
-    state = state_machine.state
-    next_slot = state.slot + 1
+def _get_slot_with_validator_selected(largest_index, start_slot, state, state_machine):
+    slot = start_slot
+    num_trials = 1000
     while True:
+        if (slot - start_slot) > num_trials:
+            raise Exception("Failed to find a slot where we have validators selected as a proposer")
         proposer_index = _get_proposer_index(
             state,
-            next_slot,
+            slot,
             state_machine.config,
         )
-        if proposer_index == alice.validator_index:
-            block = alice.propose_block(
-                slot=next_slot,
-                state=state,
-                state_machine=state_machine,
-                head_block=head,
-            )
-            # test: ensure the proposed block is saved to the chaindb
-            assert alice.chain.get_block_by_root(block.signed_root) == block
+        if proposer_index <= largest_index:
+            return slot, proposer_index
+        slot += 1
 
-            # TODO: test: `canonical_head` should change after proposing?
-            # new_head = alice.chain.get_canonical_head()
-            # assert new_head != head
 
-            # test: ensure the block is broadcast to bob
-            assert block in alice.peer_pool.connected_nodes[bob.validator_index].sub_proto.inbox
-            break
-        elif proposer_index == bob.validator_index:
-            block = bob.propose_block(
-                slot=next_slot,
-                state=state,
-                state_machine=state_machine,
-                head_block=head,
-            )
-            # test: ensure the proposed block is saved to the chaindb
-            assert bob.chain.get_block_by_root(block.signed_root) == block
+@pytest.mark.asyncio
+async def test_validator_propose_block_succeeds(caplog, event_loop, event_bus):
+    caplog.set_level(logging.DEBUG)
+    alice, bob = await get_linked_validators(event_loop=event_loop, event_bus=event_bus)
+    state_machine = alice.chain.get_state_machine()
+    state = state_machine.state
 
-            # TODO: test: `canonical_head` should change after proposing?
-            # new_head = alice.chain.get_canonical_head()
-            # assert new_head != head
+    # keep trying future slots, until either alice or bob is a proposer.
+    slot, proposer_index = _get_slot_with_validator_selected(
+        largest_index=1,
+        start_slot=state.slot + 1,
+        state=state,
+        state_machine=state_machine,
+    )
+    v: Validator = None
+    peer_index = None
+    if proposer_index == alice.validator_index:
+        v = alice
+        peer_index = bob.validator_index
+    elif proposer_index == bob.validator_index:
+        v = bob
+        peer_index = alice.validator_index
+    else:
+        # should never enter here...
+        assert False
+    head = v.chain.get_canonical_head()
+    block = v.propose_block(
+        slot=slot,
+        state=state,
+        state_machine=state_machine,
+        head_block=head,
+    )
+    # test: ensure the proposed block is saved to the chaindb
+    assert v.chain.get_block_by_root(block.signed_root) == block
 
-            # test: ensure the block is broadcast to bob
-            assert block in bob.peer_pool.connected_nodes[alice.validator_index].sub_proto.inbox
-            break
-        else:
-            next_slot += 1
+    # test: ensure that the `canonical_head` changed after proposing
+    new_head = v.chain.get_canonical_head()
+    assert new_head != head
+
+    # test: ensure the block is broadcast to its peer
+    assert block in v.peer_pool.connected_nodes[peer_index].sub_proto.inbox
+
+
+@pytest.mark.asyncio
+async def test_validator_propose_block_fails(caplog, event_loop, event_bus):
+    alice, bob = await get_linked_validators(event_loop=event_loop, event_bus=event_bus)
+    state_machine = alice.chain.get_state_machine()
+    state = state_machine.state
+    slot = state.slot + 1
+
+    proposer_index = _get_proposer_index(
+        state=state,
+        slot=slot,
+        config=state_machine.config,
+    )
+    # select the wrong validator as proposer
+    v: Validator = None
+    if proposer_index == alice.validator_index:
+        v = bob
+    else:
+        v = alice
+    head = v.chain.get_canonical_head()
+    # test: if a non-proposer validator proposes a block, the block validation should fail.
+    with pytest.raises(ValidationError):
+        v.propose_block(
+            slot=slot,
+            state=state,
+            state_machine=state_machine,
+            head_block=head,
+        )
 
 
 @pytest.mark.asyncio
@@ -195,14 +232,16 @@ async def test_validator_skip_block(caplog, event_loop, event_bus):
     alice = await get_validator(event_loop=event_loop, event_bus=event_bus, index=0)
     state_machine = alice.chain.get_state_machine()
     state = state_machine.state
-    slot = state.slot + 1  # FIXME: unsure which slot should be used here.
+    slot = state.slot + 1
     root_post_state = alice.skip_block(
         slot=slot,
         state=state,
         state_machine=state_machine,
     )
+    # test: confirm that no block is imported at the slot
     with pytest.raises(BlockNotFound):
         alice.chain.get_canonical_block_by_slot(slot)
+    # test: the state root should change after skipping the block
     assert state.root != root_post_state
     # TODO: more tests
 
@@ -213,7 +252,9 @@ async def test_validator_new_slot(caplog, event_loop, event_bus, monkeypatch):
     alice = await get_validator(event_loop=event_loop, event_bus=event_bus, index=0)
     state_machine = alice.chain.get_state_machine()
     state = state_machine.state
-    new_slot = state.slot - 1  # FIXME: unsure which slot should be used here.
+    new_slot = state.slot + 1
+    # test: `new_slot` should call `propose_block` if the validator get selected,
+    #   else calls `skip_block`.
     index = _get_proposer_index(
         state,
         new_slot,
